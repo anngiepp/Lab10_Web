@@ -8,6 +8,9 @@ const nextConfig: NextConfig = {
   },
   cacheComponents: true,
   partialPrefetching: true,
+  // El prerender del catálogo recorre 42 páginas de la API en secuencia;
+  // 120 s de margen (el timeout de caché del build se deriva de este valor).
+  staticPageGenerationTimeout: 120,
   turbopack: {
     rules: {
       "*.css": {

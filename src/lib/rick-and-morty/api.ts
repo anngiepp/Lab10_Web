@@ -15,8 +15,10 @@ async function fetchWithRetry(url: string, attempts = 6): Promise<Response> {
 
   while (res.status === 429 && attempt < attempts) {
     attempt += 1;
+    // Espera creciente pero con tope de 10 s para no acumular más de ~34 s
+    // por página (el build y Vercel tienen presupuesto de tiempo limitado).
     await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(1000 * 2 ** attempt, 30000))
+      setTimeout(resolve, Math.min(1000 * 2 ** attempt, 10000))
     );
     res = await fetch(url);
   }
@@ -42,15 +44,9 @@ export async function getCharactersPage(
 }
 
 // Recorre toda la paginación de la API (42 páginas, 826 personajes)
-// reutilizando las entradas cacheadas de getCharactersPage.
-// Lo usa únicamente el catálogo de /characters.
-//
-// A propósito NO tiene "use cache": un fill que tarda ~12 s sin emitir nada
-// al stream dispara el detector de colgados del dev server (umbral 10 s) y
-// termina en UseCacheDeadlockError ("Falló la comunicación con la dimensión").
-// Con fills cortos por página, cada entrada se cachea por separado y el
-// ensamblaje (barato) queda fuera de la caché.
-export async function getAllCharacters(): Promise<Character[]> {
+// reutilizando las entradas cacheadas de getCharactersPage. Secuencial y
+// con pausa: la API responde 429 ante ráfagas en paralelo (probado).
+async function collectAllCharacters(): Promise<Character[]> {
   const characters: Character[] = [];
   let page = 1;
   let pages = 1;
@@ -61,14 +57,32 @@ export async function getAllCharacters(): Promise<Character[]> {
     pages = data.info.pages;
     page += 1;
 
-    // Pausa breve entre páginas para no saturar la API (429). Las peticiones
-    // ya son secuenciales (una a la vez), así que basta un respiro corto.
     if (page <= pages) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 200));
     }
   } while (page <= pages);
 
   return characters;
+}
+
+// Versión para `next dev`: sin "use cache". El dev server tiene un detector
+// de colgados que lanza UseCacheDeadlockError si un fill tarda más de 10 s
+// sin emitir nada (el error «Falló la comunicación con la dimensión»). Un
+// recorrido de 42 páginas siempre lo superaría, así que en desarrollo el
+// ensamblaje queda fuera de la caché y cada página se cachea por separado.
+export function getAllCharactersDev(): Promise<Character[]> {
+  return collectAllCharacters();
+}
+
+// Versión para build y producción: con "use cache". Durante `next build` el
+// fill se ejecuta una vez, se almacena y el HTML completo de los 826
+// personajes se empaqueta como página estática; en Vercel se sirve desde CDN
+// sin tocar la API en cada request (y si la revalidación falla, se sirve el
+// contenido anterior).
+export async function getAllCharacters(): Promise<Character[]> {
+  "use cache";
+  cacheLife(TEN_DAYS);
+  return collectAllCharacters();
 }
 
 // Fetch directo por ID (1 petición). Las rutas no listadas en

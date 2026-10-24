@@ -1,9 +1,7 @@
-import { Suspense } from "react";
 import { Metadata } from "next";
 import { FaDatabase } from "react-icons/fa6";
-import { getAllCharacters } from "@/lib/rick-and-morty/api";
+import { getAllCharacters, getAllCharactersDev } from "@/lib/rick-and-morty/api";
 import { CharactersGrid } from "@/components/characters/CharactersGrid";
-import { CharactersSkeleton } from "@/components/characters/CharactersSkeleton";
 import { CharacterSearch } from "@/components/characters/CharacterSearch";
 
 export const metadata: Metadata = {
@@ -12,11 +10,15 @@ export const metadata: Metadata = {
     "Los 826 personajes de Rick and Morty, renderizados en el servidor (SSG + ISR con revalidación cada 10 días).",
 };
 
-// Catálogo renderizado en el servidor: se prerenderiza en build y se
-// revalida cada 864000 s (10 días) porque las páginas que ensambla
-// getAllCharacters tienen "use cache" con cacheLife(10 días).
+// Catálogo prerenderizado en build (SSG): sin Suspense y con los datos en
+// "use cache", el HTML completo de los 826 personajes se empaqueta en el
+// build y se sirve desde CDN. En desarrollo se usa la versión sin caché
+// (getAllCharactersDev) porque el detector de colgados del dev server
+// interpreta un fill largo como un error de deadlock.
 async function CharactersCatalog() {
-  const characters = await getAllCharacters();
+  const characters = await (process.env.NODE_ENV === "development"
+    ? getAllCharactersDev()
+    : getAllCharacters());
 
   return (
     <section aria-label="Catálogo completo">
@@ -52,9 +54,7 @@ export default function CharactersPage() {
 
       <CharacterSearch />
 
-      <Suspense fallback={<CharactersSkeleton count={12} />}>
-        <CharactersCatalog />
-      </Suspense>
+      <CharactersCatalog />
     </>
   );
 }
